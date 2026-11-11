@@ -5,7 +5,7 @@
 // @match        *://www.nicovideo.jp/ranking*
 // @match        *://www.nicovideo.jp/search/*
 // @match        *://www.nicovideo.jp/tag/*
-// @version      67.1.2
+// @version      67.1.3
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
@@ -528,8 +528,11 @@
       this.hideSideAds = store('hideSideAds', false)
       this.thumbScaleEnabled = store('thumbScaleEnabled', false)
       this.thumbScale = store('thumbScale', 75)
+      this.thumbFixedEnabled = store('thumbFixedEnabled', false)
+      this.thumbFixedWidth = store('thumbFixedWidth', 192)
       this.hideNicoadBand = store('hideNicoadBand', false)
-      this.movieInfoToggleLeft = store('movieInfoToggleLeft', false)
+      this.movieInfoTogglePosition = store('movieInfoTogglePosition', 'right')
+      this.actionPanePosition = store('actionPanePosition', 'right')
     }
     Config.prototype.sync = function() {
       return Promise.all([
@@ -556,8 +559,11 @@
         this.hideSideAds.sync(),
         this.thumbScaleEnabled.sync(),
         this.thumbScale.sync(),
+        this.thumbFixedEnabled.sync(),
+        this.thumbFixedWidth.sync(),
         this.hideNicoadBand.sync(),
-        this.movieInfoToggleLeft.sync(),
+        this.movieInfoTogglePosition.sync(),
+        this.actionPanePosition.sync(),
       ])
     }
     Config.prototype.toCSV = async function(targetTypes) {
@@ -1491,9 +1497,9 @@
     // ニコニ広告の帯(サムネイル左上にある data URI の SVG 画像)の色
     const NICOAD_BAND_COLORS = ['DCA000', 'FFD700', 'BEC8C8', '889C9C']
 
-    const scaleOf = config => {
-      const n = Number(config.thumbScale.value)
-      return Number.isFinite(n) && n > 0 ? n / 100 : 1
+    const positiveNumberOf = (value, defaultValue) => {
+      const n = Number(value)
+      return Number.isFinite(n) && n > 0 ? n : defaultValue
     }
     // キーは Config のストア名。値が true のときだけ CSS を有効にする
     const rules = {
@@ -1520,41 +1526,81 @@ html {
       hideSideAds: () => `${SIDE_COLUMN} > div:is(.ov_hidden.jc_center, :has(iframe)) {
   display: none !important;
 }`,
-      // ⑥ 動画一覧のサムネイルの縮小
-      // サイトの --video-media-object-thumbnail-width と同じ式に倍率を掛ける
-      thumbScaleEnabled: config => `${MAIN_COLUMN} [class*="--video-media-object-thumbnail-width_"] {
-  --video-media-object-thumbnail-width: calc(clamp(var(--sizes-thumbnail-min, 192px), min(calc((100cqi - var(--sizes-x1_5, 12px)) * (1 / 2.6)), var(--video-media-object-vh-related-width, 100vw)), var(--sizes-thumbnail-max, 640px)) * ${scaleOf(config)}) !important;
-}`,
       // ⑦ サムネイル左上のニコニ広告の帯
       hideNicoadBand: () => `${CONTENT} img[src^="data:image/svg+xml"]:is(${NICOAD_BAND_COLORS.map(c => `[src*="${c}" i]`).join(', ')}) {
   display: none !important;
 }`,
-      // ⑧ ▼ボタン(タグ・投稿者の表示)を順位の下に移す
-      // ▼ は行の右端に置かれるので、右枠を詰めて一覧が広がると画面の右端まで離れてしまう
-      movieInfoToggleLeft: () => `${MAIN_COLUMN} .nrn-parsed:has(> .w_x5:first-child) > .nrn-movie-info-toggle {
-  inset: auto auto 0 0 !important;
-  width: var(--sizes-x5, 40px) !important;
-  text-align: center !important;
-}`,
+    }
+    // ⑥ 動画一覧のサムネイルの幅(固定と縮小)
+    // サイトはブラウザの幅と高さから幅を決めている(下の式)。
+    // 固定するときはこの式の代わりに指定の幅を使い、縮小するときは倍率を掛ける。
+    const SITE_THUMB_WIDTH = 'clamp(var(--sizes-thumbnail-min, 192px), min(calc((100cqi - var(--sizes-x1_5, 12px)) * (1 / 2.6)), var(--video-media-object-vh-related-width, 100vw)), var(--sizes-thumbnail-max, 640px))'
+    const thumbnailCss = config => {
+      const fixed = config.thumbFixedEnabled.value
+      const scaled = config.thumbScaleEnabled.value
+      if (!fixed && !scaled) return ''
+      const base = fixed
+        ? positiveNumberOf(config.thumbFixedWidth.value, 192) + 'px'
+        : SITE_THUMB_WIDTH
+      const width = scaled
+        ? `calc(${base} * ${positiveNumberOf(config.thumbScale.value, 100) / 100})`
+        : base
+      return `${MAIN_COLUMN} [class*="--video-media-object-thumbnail-width_"] {
+  --video-media-object-thumbnail-width: ${width} !important;
+}`
     }
     // ③④⑤ をすべて非表示にして右枠が空になったら、右枠の列を詰めて動画一覧を広げる。
     // 右枠に想定外のもの(6 個目の要素)があるときは詰めない。
-    const collapseSideColumnCss = `${RANKING_GRID}:not(:has(> div:nth-child(2) > :nth-child(6))) {
+    const COLLAPSED_GRID = `${RANKING_GRID}:not(:has(> div:nth-child(2) > :nth-child(6)))`
+    const collapseSideColumnCss = `${COLLAPSED_GRID} {
   grid-template-columns: auto !important;
   & > div:nth-child(2) {
     display: none !important;
   }
 }`
+    const isSideColumnCollapsed = config => {
+      return config.hideTagRanking.value
+          && config.hideNicoNews.value
+          && config.hideSideAds.value
+    }
+    // ⑧⑨ ▼ボタンと、閲覧済み・NG登録・NGタイトル追加のボタンの位置
+    // どちらも行の右端に置かれるので、右枠を詰めて一覧が広がると画面の右端まで離れてしまう。
+    // 「従来の位置」は右枠(幅 440px + 列の間隔)があったときの位置で、右枠を詰めていなければ右端と同じ。
+    const RANK_ROW = '.nrn-parsed:has(> .w_x5:first-child)'
+    const LEGACY_RIGHT = 'calc(440px + var(--spacing-x4, 32px))'
+    const TOGGLE_POSITIONS = {
+      // 右端(元のスクリプトと同じ)
+      right: () => '',
+      legacy: config => !isSideColumnCollapsed(config) ? '' : `${COLLAPSED_GRID} > div:first-child ${RANK_ROW} > .nrn-movie-info-toggle {
+  inset: auto ${LEGACY_RIGHT} 0 auto !important;
+  width: auto !important;
+}`,
+      // 順位の下
+      rank: () => `${MAIN_COLUMN} ${RANK_ROW} > .nrn-movie-info-toggle {
+  inset: auto auto 0 0 !important;
+  width: var(--sizes-x5, 40px) !important;
+  text-align: center !important;
+}`,
+    }
+    const ACTION_PANE_POSITIONS = {
+      // 右端(元のスクリプトと同じ)
+      right: () => '',
+      legacy: config => !isSideColumnCollapsed(config) ? '' : `${COLLAPSED_GRID} > div:first-child ${RANK_ROW} > .nrn-action-pane {
+  right: ${LEGACY_RIGHT} !important;
+}`,
+    }
+    const positionCss = (positions, value, config) => {
+      return (positions[value] || positions.right)(config)
+    }
     const createCss = config => {
       const result = Object.keys(rules)
         .filter(name => config[name].value)
         .map(name => rules[name](config))
-      if (config.hideTagRanking.value
-          && config.hideNicoNews.value
-          && config.hideSideAds.value) {
-        result.push(collapseSideColumnCss)
-      }
-      return result.join('\n')
+      result.push(thumbnailCss(config))
+      if (isSideColumnCollapsed(config)) result.push(collapseSideColumnCss)
+      result.push(positionCss(TOGGLE_POSITIONS, config.movieInfoTogglePosition.value, config))
+      result.push(positionCss(ACTION_PANE_POSITIONS, config.actionPanePosition.value, config))
+      return result.filter(Boolean).join('\n')
     }
     let styleElem = null
     const apply = config => {
@@ -1565,11 +1611,14 @@ html {
       }
       styleElem.textContent = createCss(config)
     }
+    const CHECKBOX_NAMES = [...Object.keys(rules), 'thumbScaleEnabled', 'thumbFixedEnabled']
+    // 選択欄で設定する値(サムネイルの倍率と幅は数値、それ以外は文字列)
+    const SELECT_NAMES = ['thumbScale', 'thumbFixedWidth', 'movieInfoTogglePosition', 'actionPanePosition']
     return {
-      CHECKBOX_NAMES: Object.keys(rules),
+      CHECKBOX_NAMES,
       bindToConfig(config) {
         apply(config)
-        for (const name of [...Object.keys(rules), 'thumbScale']) {
+        for (const name of [...CHECKBOX_NAMES, ...SELECT_NAMES]) {
           config[name].on('changed', () => apply(config))
         }
       },
@@ -1578,6 +1627,7 @@ html {
 
   const OtherConfigDialog = (function(_super) {
     const THUMB_SCALES = [100, 90, 80, 75, 70, 60, 50, 40, 30, 25, 20]
+    const THUMB_FIXED_WIDTHS = [128, 160, 192, 224, 256, 288, 320, 352, 384, 448, 512, 640]
     const OtherConfigDialog = function(config, doc) {
       _super.call(this)
       for (const name of OtherSettings.CHECKBOX_NAMES) {
@@ -1587,12 +1637,25 @@ html {
           config[name].value = b.checked
         })
       }
-      const select = doc.getElementById('thumbScale')
-      for (const n of THUMB_SCALES) select.add(new Option(n + '%', String(n)))
-      select.value = String(config.thumbScale.value)
-      select.addEventListener('change', () => {
-        config.thumbScale.value = Number(select.value)
-      })
+      const numberSelects = [
+        ['thumbScale', THUMB_SCALES, '%'],
+        ['thumbFixedWidth', THUMB_FIXED_WIDTHS, 'px'],
+      ]
+      for (const [name, values, unit] of numberSelects) {
+        const select = doc.getElementById(name)
+        for (const n of values) select.add(new Option(n + unit, String(n)))
+        select.value = String(config[name].value)
+        select.addEventListener('change', () => {
+          config[name].value = Number(select.value)
+        })
+      }
+      for (const name of ['movieInfoTogglePosition', 'actionPanePosition']) {
+        const position = doc.getElementById(name)
+        position.value = config[name].value
+        position.addEventListener('change', () => {
+          config[name].value = position.value
+        })
+      }
       doc.getElementById('closeButton')
         .addEventListener('click', () => this.emit('closed'))
     }
@@ -1636,8 +1699,19 @@ html {
     <p><label><input type=checkbox id=hideNicoNews>右枠のニコニコニュースを非表示にする</label></p>
     <p><label><input type=checkbox id=hideSideAds>右枠の広告を非表示にする</label></p>
     <p><label><input type=checkbox id=thumbScaleEnabled>動画のサムネイルを縮小する</label> <select id=thumbScale></select></p>
+    <p><label><input type=checkbox id=thumbFixedEnabled>動画のサムネイルの幅を固定する</label> <select id=thumbFixedWidth></select></p>
     <p><label><input type=checkbox id=hideNicoadBand>サムネイル左上の「ニコニ広告」の帯を非表示にする</label></p>
-    <p><label><input type=checkbox id=movieInfoToggleLeft>▼ボタン(タグ・投稿者の表示)を右端ではなく順位の下に表示する</label></p>
+    <p><label>▼ボタン(タグ・投稿者の表示)の位置
+      <select id=movieInfoTogglePosition>
+        <option value=right>右端</option>
+        <option value=legacy>従来の位置(右枠があったときの位置)</option>
+        <option value=rank>順位の下</option>
+      </select></label></p>
+    <p><label>閲覧済み・NG登録・NGタイトル追加のボタンの位置
+      <select id=actionPanePosition>
+        <option value=right>右端</option>
+        <option value=legacy>従来の位置(右枠があったときの位置)</option>
+      </select></label></p>
     <p class=dialogBottom><input type=button value=閉じる id=closeButton></p>
     <p class=scriptInfo><small><a href=https://github.com/aoiteru/NicoNicoRankingNG_fork target=_blank>Nico Nico Ranking NG fork</a></small></p>
   </div>
