@@ -5,7 +5,7 @@
 // @match        *://www.nicovideo.jp/ranking*
 // @match        *://www.nicovideo.jp/search/*
 // @match        *://www.nicovideo.jp/tag/*
-// @version      67.1.1
+// @version      67.1.2
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
@@ -529,6 +529,7 @@
       this.thumbScaleEnabled = store('thumbScaleEnabled', false)
       this.thumbScale = store('thumbScale', 75)
       this.hideNicoadBand = store('hideNicoadBand', false)
+      this.movieInfoToggleLeft = store('movieInfoToggleLeft', false)
     }
     Config.prototype.sync = function() {
       return Promise.all([
@@ -556,6 +557,7 @@
         this.thumbScaleEnabled.sync(),
         this.thumbScale.sync(),
         this.hideNicoadBand.sync(),
+        this.movieInfoToggleLeft.sync(),
       ])
     }
     Config.prototype.toCSV = async function(targetTypes) {
@@ -1527,6 +1529,13 @@ html {
       hideNicoadBand: () => `${CONTENT} img[src^="data:image/svg+xml"]:is(${NICOAD_BAND_COLORS.map(c => `[src*="${c}" i]`).join(', ')}) {
   display: none !important;
 }`,
+      // ⑧ ▼ボタン(タグ・投稿者の表示)を順位の下に移す
+      // ▼ は行の右端に置かれるので、右枠を詰めて一覧が広がると画面の右端まで離れてしまう
+      movieInfoToggleLeft: () => `${MAIN_COLUMN} .nrn-parsed:has(> .w_x5:first-child) > .nrn-movie-info-toggle {
+  inset: auto auto 0 0 !important;
+  width: var(--sizes-x5, 40px) !important;
+  text-align: center !important;
+}`,
     }
     // ③④⑤ をすべて非表示にして右枠が空になったら、右枠の列を詰めて動画一覧を広げる。
     // 右枠に想定外のもの(6 個目の要素)があるときは詰めない。
@@ -1628,6 +1637,7 @@ html {
     <p><label><input type=checkbox id=hideSideAds>右枠の広告を非表示にする</label></p>
     <p><label><input type=checkbox id=thumbScaleEnabled>動画のサムネイルを縮小する</label> <select id=thumbScale></select></p>
     <p><label><input type=checkbox id=hideNicoadBand>サムネイル左上の「ニコニ広告」の帯を非表示にする</label></p>
+    <p><label><input type=checkbox id=movieInfoToggleLeft>▼ボタン(タグ・投稿者の表示)を右端ではなく順位の下に表示する</label></p>
     <p class=dialogBottom><input type=button value=閉じる id=closeButton></p>
     <p class=scriptInfo><small><a href=https://github.com/aoiteru/NicoNicoRankingNG_fork target=_blank>Nico Nico Ranking NG fork</a></small></p>
   </div>
