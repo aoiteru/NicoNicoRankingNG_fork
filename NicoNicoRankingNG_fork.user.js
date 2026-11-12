@@ -5,7 +5,7 @@
 // @match        *://www.nicovideo.jp/ranking*
 // @match        *://www.nicovideo.jp/search/*
 // @match        *://www.nicovideo.jp/tag/*
-// @version      67.2.0
+// @version      67.2.1
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
@@ -1591,12 +1591,17 @@ html {
   --video-media-object-thumbnail-width: ${width} !important;
 }`
     }
-    // ▼ボタンと、閲覧済み・NG登録・NGタイトル追加のボタンを「従来の位置」に置く。
-    // どちらも行の右端に置かれるので、右枠の列を詰めて一覧が広がると画面の右端まで離れてしまう。
-    const legacyToggleCss = rows => `${rows} > .nrn-movie-info-toggle {
-  inset: auto ${LEGACY_RIGHT} 0 auto !important;
-  width: auto !important;
+    // 「従来の位置」。右枠の列を詰めると動画の行が画面の右端まで広がり、行の右端にある
+    // ▼や閲覧済み・NG登録・NGタイトル追加のボタン、動画へのリンクの範囲も一緒に広がってしまう。
+    // ▼を従来の位置にしたときは、行そのものを右枠があったときの幅にする。
+    // ▼、▼で開くタグ・投稿者の表示、ボタンは行の右端に付いているので、そのまま従来の位置になる。
+    const legacyRowCss = rows => `${rows} {
+  width: calc(100% - ${LEGACY_RIGHT}) !important;
+  & > .nrn-movie-info-toggle {
+    width: auto !important;
+  }
 }`
+    // ▼は右端・順位の下のまま、ボタンだけ従来の位置にする(行は広いまま)
     const legacyActionPaneCss = rows => `${rows} > .nrn-action-pane {
   right: ${LEGACY_RIGHT} !important;
 }`
@@ -1647,6 +1652,7 @@ html {
       return s => {
         const collapsedGrid = collapsedGridOf(COLLAPSIBLE_GRID, SIDE_ITEMS, s)
         const collapsedRows = collapsedGrid && `${collapsedGrid} > div:first-child ${RANK_ROW}`
+        const legacyRows = collapsedRows && s.movieInfoTogglePosition === 'legacy'
         return [
           s.hideLeftNav && leftNavCss(),
           // 順位の無い枠(広告ブロッカーなどで中身が空のこともある)
@@ -1655,13 +1661,13 @@ html {
           thumbnailCss(s, MAIN),
           s.hideNicoadBand && nicoadBandCss(),
           collapsedGrid && collapseCss(collapsedGrid, 'div:nth-child(2)', 'grid-template-columns: auto !important;'),
-          collapsedRows && s.movieInfoTogglePosition === 'legacy' && legacyToggleCss(collapsedRows),
+          legacyRows && legacyRowCss(collapsedRows),
           s.movieInfoTogglePosition === 'rank' && `${MAIN} ${RANK_ROW} > .nrn-movie-info-toggle {
   inset: auto auto 0 0 !important;
   width: var(--sizes-x5, 40px) !important;
   text-align: center !important;
 }`,
-          collapsedRows && s.actionPanePosition === 'legacy' && legacyActionPaneCss(collapsedRows),
+          !legacyRows && collapsedRows && s.actionPanePosition === 'legacy' && legacyActionPaneCss(collapsedRows),
         ]
       }
     })()
@@ -1699,6 +1705,7 @@ html {
       return s => {
         const collapsedGrid = collapsedGridOf(GRID, SIDE_ITEMS, s)
         const collapsedRows = collapsedGrid && `${collapsedGrid} > ${LIST_ROW}`
+        const legacyRows = collapsedRows && s.movieInfoTogglePosition === 'legacy'
         return [
           s.hideLeftNav && leftNavCss(),
           s.hideNicoadMovies && hide(`${MAIN} a[data-anchor-detail="nicoad"]`),
@@ -1707,13 +1714,13 @@ html {
           s.hideNicoadBand && nicoadBandCss(),
           collapsedGrid && collapseCss(collapsedGrid, '.grid-area_right', `grid-template-columns: minmax(0, 1fr) !important;
   grid-template-areas: "header" "main" "bottom" !important;`),
-          collapsedRows && s.movieInfoTogglePosition === 'legacy' && legacyToggleCss(collapsedRows),
+          legacyRows && legacyRowCss(collapsedRows),
           // 「リスト表示」「タイル表示」のボタンも ▼ に合わせる。
           // 表示を切り替えるたびにボタンが動かないよう、タイル表示でも同じ位置にする
-          collapsedGrid && s.movieInfoTogglePosition === 'legacy' && `${collapsedGrid} > ${VIEW_BUTTONS} {
+          legacyRows && `${collapsedGrid} > ${VIEW_BUTTONS} {
   margin-right: ${LEGACY_RIGHT} !important;
 }`,
-          collapsedRows && s.actionPanePosition === 'legacy' && legacyActionPaneCss(collapsedRows),
+          !legacyRows && collapsedRows && s.actionPanePosition === 'legacy' && legacyActionPaneCss(collapsedRows),
         ]
       }
     })()
@@ -1886,7 +1893,7 @@ html {
     <p><b>その他設定</b></p>
     <div class=tabs id=tabs role=tablist></div>
     <div class=panels id=panels></div>
-    <p class=description>右枠に出ている項目をすべて非表示にすると(そのページに無い項目はオフのままで構いません)、右枠の列を詰めて動画一覧を広げます。「従来の位置」は、そのときも右枠があったときと同じ位置にボタンを置きます。</p>
+    <p class=description>右枠に出ている項目をすべて非表示にすると(そのページに無い項目はオフのままで構いません)、右枠の列を詰めて動画一覧を広げます。「従来の位置」は、そのときも右枠があったときと同じ位置にします。▼を従来の位置にすると、動画へのリンクの範囲と▼で開く表示も右枠があったときの幅になり、閲覧済み・NG登録・NGタイトル追加のボタンも従来の位置になります。</p>
     <p class=dialogBottom><input type=button value=閉じる id=closeButton></p>
     <p class=scriptInfo><small><a href=https://github.com/aoiteru/NicoNicoRankingNG_fork target=_blank>Nico Nico Ranking NG fork</a></small></p>
   </div>
