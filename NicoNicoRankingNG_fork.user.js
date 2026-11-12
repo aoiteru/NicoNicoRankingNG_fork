@@ -5,7 +5,7 @@
 // @match        *://www.nicovideo.jp/ranking*
 // @match        *://www.nicovideo.jp/search/*
 // @match        *://www.nicovideo.jp/tag/*
-// @version      67.1.3
+// @version      67.2.0
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
@@ -400,6 +400,77 @@
     return Store
   })(EventEmitter)
 
+  // その他設定の項目。ページの種類(ランキング・検索)ごとに別々に保存する。
+  // ランキングは keyPrefix が空で、ページごとに分ける前と同じキーを使う。
+  const OTHER_SETTINGS_SCHEMA = (function() {
+    const THUMB_SCALES = [100, 90, 80, 75, 70, 60, 50, 40, 30, 25, 20]
+    const THUMB_FIXED_WIDTHS = [128, 160, 192, 224, 256, 288, 320, 352, 384, 448, 512, 640]
+    const POSITION_RIGHT = ['right', '右端']
+    const POSITION_LEGACY = ['legacy', '従来の位置(右枠があったときの位置)']
+    const checkbox = (name, label, select) => {
+      return {type: 'checkbox', name, label, defaultValue: false, select}
+    }
+    const select = (name, label, options, defaultValue) => {
+      return {type: 'select', name, label, options, defaultValue}
+    }
+    const leftNav = checkbox('hideLeftNav', '左枠(メニュー)を非表示にする')
+    const thumbnail = [
+      checkbox('thumbScaleEnabled', '動画のサムネイルを縮小する', {
+        name: 'thumbScale',
+        options: THUMB_SCALES.map(n => [n, n + '%']),
+        defaultValue: 75,
+      }),
+      checkbox('thumbFixedEnabled', '動画のサムネイルの幅を固定する', {
+        name: 'thumbFixedWidth',
+        options: THUMB_FIXED_WIDTHS.map(n => [n, n + 'px']),
+        defaultValue: 192,
+      }),
+    ]
+    const nicoadBand = checkbox('hideNicoadBand', 'サムネイル左上の「ニコニ広告」の帯を非表示にする')
+    const actionPanePosition = select('actionPanePosition', '閲覧済み・NG登録・NGタイトル追加のボタンの位置', [POSITION_RIGHT, POSITION_LEGACY], 'right')
+    const searchItems = [
+      leftNav,
+      checkbox('hideNicoadMovies', '動画一覧の「ニコニ広告」の動画を非表示にする'),
+      checkbox('hideSideBanner', '右枠のお知らせバナーを非表示にする'),
+      checkbox('hideSideAds', '右枠の広告を非表示にする'),
+      checkbox('hideTagInfo', '右枠のタグの説明(ニコニコ大百科)・関連タグを非表示にする'),
+      checkbox('hideRelatedShorts', '右枠の関連ショートを非表示にする'),
+      checkbox('hideRelatedSeries', '右枠の関連シリーズを非表示にする'),
+      checkbox('hideRelatedChannels', '右枠の関連チャンネルを非表示にする'),
+      ...thumbnail,
+      nicoadBand,
+      select('movieInfoTogglePosition', '▼ボタン(タグ・投稿者の表示)の位置', [POSITION_RIGHT, POSITION_LEGACY], 'right'),
+      actionPanePosition,
+    ]
+    return [
+      {
+        type: 'ranking',
+        label: 'ランキング',
+        description: 'ランキングページ(/ranking/…)用の設定です。',
+        keyPrefix: '',
+        items: [
+          leftNav,
+          checkbox('hideNicoadMovies', 'ランキング中の「ニコニ広告」の動画を非表示にする'),
+          checkbox('hideTagRanking', '右枠の個別タグランキングを非表示にする'),
+          checkbox('hideNicoNews', '右枠のニコニコニュースを非表示にする'),
+          checkbox('hideSideAds', '右枠の広告を非表示にする'),
+          ...thumbnail,
+          nicoadBand,
+          select('movieInfoTogglePosition', '▼ボタン(タグ・投稿者の表示)の位置', [POSITION_RIGHT, POSITION_LEGACY, ['rank', '順位の下']], 'right'),
+          actionPanePosition,
+        ],
+      },
+      {
+        // タグ検索とキーワード検索は URL が違うだけで表示するものが同じなので、設定も共通
+        type: 'search',
+        label: '検索',
+        description: 'タグ検索(/tag/…)とキーワード検索(/search/…)のページ用の設定です。',
+        keyPrefix: 'search_',
+        items: searchItems,
+      },
+    ]
+  })()
+
   var Config = (function() {
     var ngMovieVisibleStore = function() {
       var value
@@ -520,19 +591,19 @@
       this.ngMovieVisible = ngMovieVisibleStore()
       this.addToNgLockedTags = store('addToNgLockedTags', false);
       this.unknownContributorMovieVisible = store('unknownContributorMovieVisible', true);
-      // その他設定
-      this.hideLeftNav = store('hideLeftNav', false)
-      this.hideNicoadMovies = store('hideNicoadMovies', false)
-      this.hideTagRanking = store('hideTagRanking', false)
-      this.hideNicoNews = store('hideNicoNews', false)
-      this.hideSideAds = store('hideSideAds', false)
-      this.thumbScaleEnabled = store('thumbScaleEnabled', false)
-      this.thumbScale = store('thumbScale', 75)
-      this.thumbFixedEnabled = store('thumbFixedEnabled', false)
-      this.thumbFixedWidth = store('thumbFixedWidth', 192)
-      this.hideNicoadBand = store('hideNicoadBand', false)
-      this.movieInfoTogglePosition = store('movieInfoTogglePosition', 'right')
-      this.actionPanePosition = store('actionPanePosition', 'right')
+      // その他設定: otherSettings[ページの種類][項目名] にストアを置く
+      this.otherSettings = {}
+      for (const page of OTHER_SETTINGS_SCHEMA) {
+        const stores = {}
+        for (const item of page.items) {
+          stores[item.name] = store(page.keyPrefix + item.name, item.defaultValue)
+          if (item.select) {
+            stores[item.select.name]
+              = store(page.keyPrefix + item.select.name, item.select.defaultValue)
+          }
+        }
+        this.otherSettings[page.type] = stores
+      }
     }
     Config.prototype.sync = function() {
       return Promise.all([
@@ -552,18 +623,9 @@
         this.ngChannelIds.sync(),
         this.addToNgLockedTags.sync(),
         this.unknownContributorMovieVisible.sync(),
-        this.hideLeftNav.sync(),
-        this.hideNicoadMovies.sync(),
-        this.hideTagRanking.sync(),
-        this.hideNicoNews.sync(),
-        this.hideSideAds.sync(),
-        this.thumbScaleEnabled.sync(),
-        this.thumbScale.sync(),
-        this.thumbFixedEnabled.sync(),
-        this.thumbFixedWidth.sync(),
-        this.hideNicoadBand.sync(),
-        this.movieInfoTogglePosition.sync(),
-        this.actionPanePosition.sync(),
+        ...Object.values(this.otherSettings)
+          .flatMap(stores => Object.values(stores))
+          .map(s => s.sync()),
       ])
     }
     Config.prototype.toCSV = async function(targetTypes) {
@@ -1487,175 +1549,278 @@
     return ConfigDialog
   })(EventEmitter)
 
-  // その他設定: ページの不要な部分を CSS で非表示・縮小する
+  // その他設定: ページの不要な部分を CSS で非表示・縮小する。設定はページの種類ごとに別々
   const OtherSettings = (function() {
     const CONTENT = '[aria-label="nicovideo-content"]'
-    // ランキングページの 2 カラム(左: 動画一覧、右: 幅 440px の右枠)
-    const RANKING_GRID = `${CONTENT} section .d_grid[class*="grid-tc_auto_440px"]`
-    const MAIN_COLUMN = `${RANKING_GRID} > div:first-child`
-    const SIDE_COLUMN = `${RANKING_GRID} > div:nth-child(2)`
     // ニコニ広告の帯(サムネイル左上にある data URI の SVG 画像)の色
     const NICOAD_BAND_COLORS = ['DCA000', 'FFD700', 'BEC8C8', '889C9C']
+    // 右枠(幅 440px + 列の間隔)があったときの、行の右端からの距離
+    const LEGACY_RIGHT = 'calc(440px + var(--spacing-x4, 32px))'
+    // サイトがブラウザの幅と高さからサムネイルの幅を決めている式(--video-media-object-thumbnail-width)
+    const SITE_THUMB_WIDTH = 'clamp(var(--sizes-thumbnail-min, 192px), min(calc((100cqi - var(--sizes-x1_5, 12px)) * (1 / 2.6)), var(--video-media-object-vh-related-width, 100vw)), var(--sizes-thumbnail-max, 640px))'
 
+    const hide = selector => `${selector} {
+  display: none !important;
+}`
     const positiveNumberOf = (value, defaultValue) => {
       const n = Number(value)
       return Number.isFinite(n) && n > 0 ? n : defaultValue
     }
-    // キーは Config のストア名。値が true のときだけ CSS を有効にする
-    const rules = {
-      // ① 左枠(メニュー)
-      hideLeftNav: () => `#root main > nav {
+
+    // どのページでも同じもの
+    const leftNavCss = () => `#root main > nav {
   display: none !important;
 }
 html {
   --sizes-web-drawer-current-width: 0px !important;
-}`,
-      // ② ランキング中のニコニ広告の動画(順位の無い枠)
-      hideNicoadMovies: () => `${MAIN_COLUMN} > div > div[class*="pl_[calc("] {
-  display: none !important;
-}`,
-      // ③ 右枠の個別タグランキング
-      hideTagRanking: () => `${SIDE_COLUMN} > div:has(a[href*="/ranking/genre/"]) {
-  display: none !important;
-}`,
-      // ④ 右枠のニコニコニュース
-      hideNicoNews: () => `${SIDE_COLUMN} > div:has(a[href*="news.nicovideo.jp"]) {
-  display: none !important;
-}`,
-      // ⑤ 右枠の広告
-      hideSideAds: () => `${SIDE_COLUMN} > div:is(.ov_hidden.jc_center, :has(iframe)) {
-  display: none !important;
-}`,
-      // ⑦ サムネイル左上のニコニ広告の帯
-      hideNicoadBand: () => `${CONTENT} img[src^="data:image/svg+xml"]:is(${NICOAD_BAND_COLORS.map(c => `[src*="${c}" i]`).join(', ')}) {
-  display: none !important;
-}`,
+}`
+    const nicoadBandCss = () => {
+      const colors = NICOAD_BAND_COLORS.map(c => `[src*="${c}" i]`).join(', ')
+      return hide(`${CONTENT} img[src^="data:image/svg+xml"]:is(${colors})`)
     }
-    // ⑥ 動画一覧のサムネイルの幅(固定と縮小)
-    // サイトはブラウザの幅と高さから幅を決めている(下の式)。
-    // 固定するときはこの式の代わりに指定の幅を使い、縮小するときは倍率を掛ける。
-    const SITE_THUMB_WIDTH = 'clamp(var(--sizes-thumbnail-min, 192px), min(calc((100cqi - var(--sizes-x1_5, 12px)) * (1 / 2.6)), var(--video-media-object-vh-related-width, 100vw)), var(--sizes-thumbnail-max, 640px))'
-    const thumbnailCss = config => {
-      const fixed = config.thumbFixedEnabled.value
-      const scaled = config.thumbScaleEnabled.value
-      if (!fixed && !scaled) return ''
-      const base = fixed
-        ? positiveNumberOf(config.thumbFixedWidth.value, 192) + 'px'
+    // サムネイルの幅。固定するときはサイトの式の代わりに指定の幅を使い、縮小するときは倍率を掛ける
+    const thumbnailCss = (s, mainColumn) => {
+      if (!s.thumbFixedEnabled && !s.thumbScaleEnabled) return ''
+      const base = s.thumbFixedEnabled
+        ? positiveNumberOf(s.thumbFixedWidth, 192) + 'px'
         : SITE_THUMB_WIDTH
-      const width = scaled
-        ? `calc(${base} * ${positiveNumberOf(config.thumbScale.value, 100) / 100})`
+      const width = s.thumbScaleEnabled
+        ? `calc(${base} * ${positiveNumberOf(s.thumbScale, 100) / 100})`
         : base
-      return `${MAIN_COLUMN} [class*="--video-media-object-thumbnail-width_"] {
+      return `${mainColumn} [class*="--video-media-object-thumbnail-width_"] {
   --video-media-object-thumbnail-width: ${width} !important;
 }`
     }
-    // ③④⑤ をすべて非表示にして右枠が空になったら、右枠の列を詰めて動画一覧を広げる。
-    // 右枠に想定外のもの(6 個目の要素)があるときは詰めない。
-    const COLLAPSED_GRID = `${RANKING_GRID}:not(:has(> div:nth-child(2) > :nth-child(6)))`
-    const collapseSideColumnCss = `${COLLAPSED_GRID} {
-  grid-template-columns: auto !important;
-  & > div:nth-child(2) {
+    // ▼ボタンと、閲覧済み・NG登録・NGタイトル追加のボタンを「従来の位置」に置く。
+    // どちらも行の右端に置かれるので、右枠の列を詰めて一覧が広がると画面の右端まで離れてしまう。
+    const legacyToggleCss = rows => `${rows} > .nrn-movie-info-toggle {
+  inset: auto ${LEGACY_RIGHT} 0 auto !important;
+  width: auto !important;
+}`
+    const legacyActionPaneCss = rows => `${rows} > .nrn-action-pane {
+  right: ${LEGACY_RIGHT} !important;
+}`
+
+    // 右枠に表示されたままの項目が無いときに当てはまる、グリッドのセレクタ。
+    // 項目ごとに「非表示にした」か「そのページに無い(marker が見つからない)」なら空とみなす。
+    // 右枠の項目を 1 つも非表示にしていないときは null(右枠の列を詰めない)。
+    const collapsedGridOf = (grid, sideItems, s) => {
+      const names = Object.keys(sideItems)
+      if (!names.some(name => s[name])) return null
+      return grid + names
+        .filter(name => !s[name])
+        .map(name => `:not(:has(${sideItems[name].marker}))`)
+        .join('')
+    }
+    // 右枠を消して、その列を詰める
+    const collapseCss = (collapsedGrid, side, columns) => `${collapsedGrid} {
+  ${columns}
+  & > ${side} {
     display: none !important;
   }
 }`
-    const isSideColumnCollapsed = config => {
-      return config.hideTagRanking.value
-          && config.hideNicoNews.value
-          && config.hideSideAds.value
-    }
-    // ⑧⑨ ▼ボタンと、閲覧済み・NG登録・NGタイトル追加のボタンの位置
-    // どちらも行の右端に置かれるので、右枠を詰めて一覧が広がると画面の右端まで離れてしまう。
-    // 「従来の位置」は右枠(幅 440px + 列の間隔)があったときの位置で、右枠を詰めていなければ右端と同じ。
-    const RANK_ROW = '.nrn-parsed:has(> .w_x5:first-child)'
-    const LEGACY_RIGHT = 'calc(440px + var(--spacing-x4, 32px))'
-    const TOGGLE_POSITIONS = {
-      // 右端(元のスクリプトと同じ)
-      right: () => '',
-      legacy: config => !isSideColumnCollapsed(config) ? '' : `${COLLAPSED_GRID} > div:first-child ${RANK_ROW} > .nrn-movie-info-toggle {
-  inset: auto ${LEGACY_RIGHT} 0 auto !important;
-  width: auto !important;
-}`,
-      // 順位の下
-      rank: () => `${MAIN_COLUMN} ${RANK_ROW} > .nrn-movie-info-toggle {
+
+    // ランキングページ: 2 カラム(左: 動画一覧、右: 幅 440px の右枠)
+    const rankingCss = (function() {
+      const GRID = `${CONTENT} section .d_grid[class*="grid-tc_auto_440px"]`
+      const MAIN = `${GRID} > div:first-child`
+      const SIDE = `${GRID} > div:nth-child(2)`
+      // 順位の付いた行
+      const RANK_ROW = '.nrn-parsed:has(> .w_x5:first-child)'
+      // selector: 非表示にする要素。marker: その項目がページにあるかを、グリッドから調べるセレクタ
+      const SIDE_ITEMS = {
+        hideTagRanking: {
+          selector: `${SIDE} > div:has(a[href*="/ranking/genre/"])`,
+          marker: '> div:nth-child(2) > div a[href*="/ranking/genre/"]',
+        },
+        hideNicoNews: {
+          selector: `${SIDE} > div:has(a[href*="news.nicovideo.jp"])`,
+          marker: '> div:nth-child(2) > div a[href*="news.nicovideo.jp"]',
+        },
+        hideSideAds: {
+          selector: `${SIDE} > div:is(.ov_hidden.jc_center, :has(iframe))`,
+          marker: '> div:nth-child(2) > div.ov_hidden.jc_center, > div:nth-child(2) > div iframe',
+        },
+      }
+      // 右枠に想定外のもの(6 個目の要素)があるときは右枠の列を詰めない
+      const COLLAPSIBLE_GRID = `${GRID}:not(:has(> div:nth-child(2) > :nth-child(6)))`
+      return s => {
+        const collapsedGrid = collapsedGridOf(COLLAPSIBLE_GRID, SIDE_ITEMS, s)
+        const collapsedRows = collapsedGrid && `${collapsedGrid} > div:first-child ${RANK_ROW}`
+        return [
+          s.hideLeftNav && leftNavCss(),
+          // 順位の無い枠(広告ブロッカーなどで中身が空のこともある)
+          s.hideNicoadMovies && hide(`${MAIN} > div > div:is([class*="pl_[calc("], :has(a[data-anchor-detail="nicoad"]))`),
+          ...Object.entries(SIDE_ITEMS).map(([name, item]) => s[name] && hide(item.selector)),
+          thumbnailCss(s, MAIN),
+          s.hideNicoadBand && nicoadBandCss(),
+          collapsedGrid && collapseCss(collapsedGrid, 'div:nth-child(2)', 'grid-template-columns: auto !important;'),
+          collapsedRows && s.movieInfoTogglePosition === 'legacy' && legacyToggleCss(collapsedRows),
+          s.movieInfoTogglePosition === 'rank' && `${MAIN} ${RANK_ROW} > .nrn-movie-info-toggle {
   inset: auto auto 0 0 !important;
   width: var(--sizes-x5, 40px) !important;
   text-align: center !important;
 }`,
-    }
-    const ACTION_PANE_POSITIONS = {
-      // 右端(元のスクリプトと同じ)
-      right: () => '',
-      legacy: config => !isSideColumnCollapsed(config) ? '' : `${COLLAPSED_GRID} > div:first-child ${RANK_ROW} > .nrn-action-pane {
-  right: ${LEGACY_RIGHT} !important;
+          collapsedRows && s.actionPanePosition === 'legacy' && legacyActionPaneCss(collapsedRows),
+        ]
+      }
+    })()
+
+    // タグ検索・キーワード検索ページ: grid-template-areas で header・main・right・bottom に分かれている
+    const searchCss = (function() {
+      const GRID = `${CONTENT} .d_grid:has(> .grid-area_right)`
+      const MAIN = `${GRID} > .grid-area_main`
+      const SIDE = `${GRID} > .grid-area_right`
+      // 中のリンクの data-anchor-area で見分けるパネル
+      const panel = anchorArea => ({
+        selector: `${SIDE} > div:has([data-anchor-area*="${anchorArea}"])`,
+        marker: `> .grid-area_right > div [data-anchor-area*="${anchorArea}"]`,
+      })
+      const SIDE_ITEMS = {
+        hideSideBanner: {selector: `${SIDE} > a`, marker: '> .grid-area_right > a'},
+        hideSideAds: {
+          selector: `${SIDE} > div:is(.ov_hidden.jc_center, :has(iframe))`,
+          marker: '> .grid-area_right > div.ov_hidden.jc_center, > .grid-area_right > div iframe',
+        },
+        // タグ検索ではタグの説明(ニコニコ大百科)と関連タグ、キーワード検索では関連タグ(タグで検索)
+        hideTagInfo: {
+          selector: `${SIDE} > div:has(a[href*="dic.nicovideo.jp"], [data-anchor-area*="related_tag"])`,
+          marker: '> .grid-area_right > div a[href*="dic.nicovideo.jp"], > .grid-area_right > div [data-anchor-area*="related_tag"]',
+        },
+        hideRelatedShorts: panel('related_short'),
+        hideRelatedSeries: panel('related_series'),
+        hideRelatedChannels: panel('related_channel'),
+      }
+      // リスト表示の各動画。タイル表示の各動画(.d_grid の子)は小さな箱なので、
+      // ▼などはタイルの右下・右上のままにする
+      const LIST_ROW = '.grid-area_main .flex-d_column > .nrn-parsed'
+      // 動画一覧の上の「リスト表示」「タイル表示」のボタン
+      const VIEW_BUTTONS = '.grid-area_main > div:first-child > div:last-child'
+      return s => {
+        const collapsedGrid = collapsedGridOf(GRID, SIDE_ITEMS, s)
+        const collapsedRows = collapsedGrid && `${collapsedGrid} > ${LIST_ROW}`
+        return [
+          s.hideLeftNav && leftNavCss(),
+          s.hideNicoadMovies && hide(`${MAIN} a[data-anchor-detail="nicoad"]`),
+          ...Object.entries(SIDE_ITEMS).map(([name, item]) => s[name] && hide(item.selector)),
+          thumbnailCss(s, MAIN),
+          s.hideNicoadBand && nicoadBandCss(),
+          collapsedGrid && collapseCss(collapsedGrid, '.grid-area_right', `grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-areas: "header" "main" "bottom" !important;`),
+          collapsedRows && s.movieInfoTogglePosition === 'legacy' && legacyToggleCss(collapsedRows),
+          // 「リスト表示」「タイル表示」のボタンも ▼ に合わせる。
+          // 表示を切り替えるたびにボタンが動かないよう、タイル表示でも同じ位置にする
+          collapsedGrid && s.movieInfoTogglePosition === 'legacy' && `${collapsedGrid} > ${VIEW_BUTTONS} {
+  margin-right: ${LEGACY_RIGHT} !important;
 }`,
+          collapsedRows && s.actionPanePosition === 'legacy' && legacyActionPaneCss(collapsedRows),
+        ]
+      }
+    })()
+
+    const CSS_OF_PAGE = {ranking: rankingCss, search: searchCss}
+    const currentPageType = () => {
+      const p = location.pathname
+      if (p.startsWith('/ranking')) return 'ranking'
+      if (p.startsWith('/tag/') || p.startsWith('/search/')) return 'search'
+      return null
     }
-    const positionCss = (positions, value, config) => {
-      return (positions[value] || positions.right)(config)
-    }
-    const createCss = config => {
-      const result = Object.keys(rules)
-        .filter(name => config[name].value)
-        .map(name => rules[name](config))
-      result.push(thumbnailCss(config))
-      if (isSideColumnCollapsed(config)) result.push(collapseSideColumnCss)
-      result.push(positionCss(TOGGLE_POSITIONS, config.movieInfoTogglePosition.value, config))
-      result.push(positionCss(ACTION_PANE_POSITIONS, config.actionPanePosition.value, config))
-      return result.filter(Boolean).join('\n')
+    const valuesOf = stores => {
+      return Object.fromEntries(Object.entries(stores).map(([name, s]) => [name, s.value]))
     }
     let styleElem = null
+    let appliedPageType
     const apply = config => {
       if (!styleElem) {
         styleElem = document.createElement('style')
         styleElem.id = 'nrn-other-settings-style'
         appendToHead(styleElem)
       }
-      styleElem.textContent = createCss(config)
+      const type = currentPageType()
+      appliedPageType = type
+      styleElem.textContent = type
+        ? CSS_OF_PAGE[type](valuesOf(config.otherSettings[type])).filter(Boolean).join('\n')
+        : ''
     }
-    const CHECKBOX_NAMES = [...Object.keys(rules), 'thumbScaleEnabled', 'thumbFixedEnabled']
-    // 選択欄で設定する値(サムネイルの倍率と幅は数値、それ以外は文字列)
-    const SELECT_NAMES = ['thumbScale', 'thumbFixedWidth', 'movieInfoTogglePosition', 'actionPanePosition']
     return {
-      CHECKBOX_NAMES,
+      currentPageType,
       bindToConfig(config) {
         apply(config)
-        for (const name of [...CHECKBOX_NAMES, ...SELECT_NAMES]) {
-          config[name].on('changed', () => apply(config))
+        for (const stores of Object.values(config.otherSettings)) {
+          for (const s of Object.values(stores)) s.on('changed', () => apply(config))
         }
+        // サイト内の移動(SPA)でページの種類が変わったら、そのページの設定に切り替える
+        new MutationObserver(() => {
+          if (currentPageType() !== appliedPageType) apply(config)
+        }).observe(document, {childList: true, subtree: true})
       },
     }
   })()
 
+  // その他設定のダイアログ。ページの種類ごとのタブを OTHER_SETTINGS_SCHEMA から作る
   const OtherConfigDialog = (function(_super) {
-    const THUMB_SCALES = [100, 90, 80, 75, 70, 60, 50, 40, 30, 25, 20]
-    const THUMB_FIXED_WIDTHS = [128, 160, 192, 224, 256, 288, 320, 352, 384, 448, 512, 640]
-    const OtherConfigDialog = function(config, doc) {
+    const createSelect = (doc, options, store) => {
+      const numeric = typeof options[0][0] === 'number'
+      const result = doc.createElement('select')
+      for (const [value, text] of options) result.add(new Option(text, String(value)))
+      result.value = String(store.value)
+      result.addEventListener('change', () => {
+        store.value = numeric ? Number(result.value) : result.value
+      })
+      return result
+    }
+    const createRow = (doc, item, stores) => {
+      const result = doc.createElement('p')
+      const label = doc.createElement('label')
+      result.append(label)
+      if (item.type === 'checkbox') {
+        const store = stores[item.name]
+        const checkbox = doc.createElement('input')
+        checkbox.type = 'checkbox'
+        checkbox.checked = store.value
+        checkbox.addEventListener('change', () => {
+          store.value = checkbox.checked
+        })
+        label.append(checkbox, item.label)
+        if (item.select) {
+          result.append(' ', createSelect(doc, item.select.options, stores[item.select.name]))
+        }
+      } else {
+        label.append(item.label, ' ', createSelect(doc, item.options, stores[item.name]))
+      }
+      return result
+    }
+    const OtherConfigDialog = function(config, doc, initialPageType) {
       _super.call(this)
-      for (const name of OtherSettings.CHECKBOX_NAMES) {
-        const b = doc.getElementById(name)
-        b.checked = config[name].value
-        b.addEventListener('change', () => {
-          config[name].value = b.checked
-        })
+      const tabs = doc.getElementById('tabs')
+      const panels = doc.getElementById('panels')
+      const pages = OTHER_SETTINGS_SCHEMA.map(page => {
+        const tab = doc.createElement('button')
+        tab.type = 'button'
+        tab.setAttribute('role', 'tab')
+        tab.textContent = page.label
+        const panel = doc.createElement('div')
+        panel.setAttribute('role', 'tabpanel')
+        const description = doc.createElement('p')
+        description.className = 'description'
+        description.textContent = page.description
+        panel.append(description)
+        for (const item of page.items) {
+          panel.append(createRow(doc, item, config.otherSettings[page.type]))
+        }
+        tabs.append(tab)
+        panels.append(panel)
+        return {type: page.type, tab, panel}
+      })
+      const selectTab = type => {
+        for (const p of pages) {
+          p.tab.setAttribute('aria-selected', String(p.type === type))
+          p.panel.hidden = p.type !== type
+        }
       }
-      const numberSelects = [
-        ['thumbScale', THUMB_SCALES, '%'],
-        ['thumbFixedWidth', THUMB_FIXED_WIDTHS, 'px'],
-      ]
-      for (const [name, values, unit] of numberSelects) {
-        const select = doc.getElementById(name)
-        for (const n of values) select.add(new Option(n + unit, String(n)))
-        select.value = String(config[name].value)
-        select.addEventListener('change', () => {
-          config[name].value = Number(select.value)
-        })
-      }
-      for (const name of ['movieInfoTogglePosition', 'actionPanePosition']) {
-        const position = doc.getElementById(name)
-        position.value = config[name].value
-        position.addEventListener('change', () => {
-          config[name].value = position.value
-        })
-      }
+      for (const p of pages) p.tab.addEventListener('click', () => selectTab(p.type))
+      // 開いているページの種類のタブを最初に表示する
+      selectTab(pages.some(p => p.type === initialPageType) ? initialPageType : pages[0].type)
       doc.getElementById('closeButton')
         .addEventListener('click', () => this.emit('closed'))
     }
@@ -1664,7 +1829,7 @@ html {
 <html><head><style>
   html {
     margin: 0 auto;
-    max-width: 30em;
+    max-width: 34em;
     height: 100%;
     line-height: 1.5em;
   }
@@ -1683,6 +1848,32 @@ html {
   p {
     margin: 0;
   }
+  .tabs {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+    border-bottom: 1px solid #999;
+  }
+  .tabs button {
+    margin-bottom: -1px;
+    padding: 2px 12px;
+    border: 1px solid #999;
+    border-radius: 4px 4px 0 0;
+    background-color: #eee;
+    cursor: pointer;
+  }
+  .tabs button[aria-selected="true"] {
+    border-bottom-color: white;
+    background-color: white;
+    font-weight: bold;
+  }
+  .panels {
+    padding: 8px 0;
+  }
+  .description {
+    color: #666;
+    font-size: small;
+  }
   .dialogBottom {
     margin-top: 8px;
     text-align: center;
@@ -1693,25 +1884,9 @@ html {
 </style></head><body>
   <div class=dialog>
     <p><b>その他設定</b></p>
-    <p><label><input type=checkbox id=hideLeftNav>左枠(メニュー)を非表示にする</label></p>
-    <p><label><input type=checkbox id=hideNicoadMovies>ランキング中の「ニコニ広告」の動画を非表示にする</label></p>
-    <p><label><input type=checkbox id=hideTagRanking>右枠の個別タグランキングを非表示にする</label></p>
-    <p><label><input type=checkbox id=hideNicoNews>右枠のニコニコニュースを非表示にする</label></p>
-    <p><label><input type=checkbox id=hideSideAds>右枠の広告を非表示にする</label></p>
-    <p><label><input type=checkbox id=thumbScaleEnabled>動画のサムネイルを縮小する</label> <select id=thumbScale></select></p>
-    <p><label><input type=checkbox id=thumbFixedEnabled>動画のサムネイルの幅を固定する</label> <select id=thumbFixedWidth></select></p>
-    <p><label><input type=checkbox id=hideNicoadBand>サムネイル左上の「ニコニ広告」の帯を非表示にする</label></p>
-    <p><label>▼ボタン(タグ・投稿者の表示)の位置
-      <select id=movieInfoTogglePosition>
-        <option value=right>右端</option>
-        <option value=legacy>従来の位置(右枠があったときの位置)</option>
-        <option value=rank>順位の下</option>
-      </select></label></p>
-    <p><label>閲覧済み・NG登録・NGタイトル追加のボタンの位置
-      <select id=actionPanePosition>
-        <option value=right>右端</option>
-        <option value=legacy>従来の位置(右枠があったときの位置)</option>
-      </select></label></p>
+    <div class=tabs id=tabs role=tablist></div>
+    <div class=panels id=panels></div>
+    <p class=description>右枠に出ている項目をすべて非表示にすると(そのページに無い項目はオフのままで構いません)、右枠の列を詰めて動画一覧を広げます。「従来の位置」は、そのときも右枠があったときと同じ位置にボタンを置きます。</p>
     <p class=dialogBottom><input type=button value=閉じる id=closeButton></p>
     <p class=scriptInfo><small><a href=https://github.com/aoiteru/NicoNicoRankingNG_fork target=_blank>Nico Nico Ranking NG fork</a></small></p>
   </div>
@@ -2580,7 +2755,7 @@ html {
       },
       showOtherConfigDialog(config) {
         this._showDialog(OtherConfigDialog.SRCDOC, doc => {
-          return new OtherConfigDialog(config, doc)
+          return new OtherConfigDialog(config, doc, OtherSettings.currentPageType())
         })
       },
       _showDialog(srcdoc, createDialog) {
